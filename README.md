@@ -7,10 +7,10 @@ Behind the scenes, the library is composed by two main building blocks: A <a hre
 
 ## Installation
 
-To install **QReader**, simply run:
+To install **QReader** (customised), simply run:
 
 ```bash
-pip install qreader
+pip install https://github.com/rafiibrahim8/QReader/archive/customised.zip
 ```
 
 You may need to install some additional **pyzbar** dependencies:
