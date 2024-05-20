@@ -25,7 +25,7 @@ DEFAULT_REENCODINGS = ('shift-jis', 'big5') if os.name == 'nt' else ('big5', 'sh
 
 class QReader:
     def __init__(self, model_size: str = 's', min_confidence: float = 0.5,
-                 reencode_to: str | tuple[str] | list[str] | None = DEFAULT_REENCODINGS):
+                 reencode_to: str | tuple[str] | list[str] | None = DEFAULT_REENCODINGS, faster: bool = False, **kwargs):
         """
         This class implements a robust, ML Based QR detector & decoder.
 
@@ -41,6 +41,8 @@ class QReader:
             - 'cp65001' for Asian languages (Thanks to @nguyen-viet-hung for the suggestion)
         """
         self.detector = QRDetector(model_size=model_size, conf_th=min_confidence)
+        self._faster_is_faster = faster
+        self._faster_scale_factor = kwargs.get('faster_scale_factor', 3)
 
         if isinstance(reencode_to, str):
             self.reencode_to = (reencode_to,) if reencode_to != 'utf-8' else ()
@@ -172,6 +174,24 @@ class QReader:
             PADDED_QUAD_XY: polygon.copy()
         }
 
+    def _decode_qr_zbar_faster(self, image: np.ndarray,
+                        detection_result: dict[str, np.ndarray | float | tuple[float | int, float | int]]) -> list[
+        Decoded]:
+        """
+        Same as _decode_qr_zbar, but with a faster approach that skips some of the preprocessing steps.
+        """
+        cropped_bbox, _ = crop_qr(image=image, detection=detection_result, crop_key=BBOX_XYXY)
+        rescaled_image = cv2.resize(src=cropped_bbox, dsize=None, fx=self._faster_scale_factor, fy=self._faster_scale_factor,
+                                    interpolation=cv2.INTER_LANCZOS4)
+
+        if len(rescaled_image.shape) == 3:
+            # If it not works, try to sharpen the image
+            sharpened_gray = cv2.cvtColor(cv2.filter2D(src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL),
+                                            cv2.COLOR_RGB2GRAY)
+        else:
+            sharpened_gray = cv2.filter2D(src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL)
+        return self.__threshold_and_blur_decodings(image=sharpened_gray, blur_kernel_sizes=((3, 3),))
+    
     def _decode_qr_zbar(self, image: np.ndarray,
                         detection_result: dict[str, np.ndarray | float | tuple[float | int, float | int]]) -> list[
         Decoded]:
@@ -184,6 +204,8 @@ class QReader:
             expects just one of them.
         :return: tuple. The decoded QR code in the zbar format.
         """
+        if self._faster_is_faster:
+            return self._decode_qr_zbar_faster(image, detection_result)
         # Crop the QR for bbox and quad
         cropped_bbox, _ = crop_qr(image=image, detection=detection_result, crop_key=BBOX_XYXY)
         cropped_quad, updated_detection = crop_qr(image=image, detection=detection_result, crop_key=PADDED_QUAD_XY)
